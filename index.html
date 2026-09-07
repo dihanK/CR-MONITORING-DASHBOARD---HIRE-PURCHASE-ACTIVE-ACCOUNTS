@@ -302,6 +302,7 @@ canvas {
     <label class="file-label" for="excelFile">↥ Upload Latest Excel</label>
     <input id="excelFile" type="file" accept=".xlsx,.xls,.csv">
     <button class="secondary" onclick="downloadCSV()">Export Current View</button>
+    
   </div>
 </header>
 
@@ -448,18 +449,100 @@ function downloadCSV(){
   XLSX.utils.book_append_sheet(wb,ws,"CR Monitoring");
   XLSX.writeFile(wb,"CR_Monitoring_Current_View.xlsx");
 }
+const STORAGE_KEY = "crMonitoringDashboardData";
+const STORAGE_NAME_KEY = "crMonitoringDashboardSourceName";
+const STORAGE_DATE_KEY = "crMonitoringDashboardLastUpdated";
+
+function saveDashboardData(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(
+      STORAGE_NAME_KEY,
+      document.getElementById("sourceName").textContent || "Saved Excel Data"
+    );
+    localStorage.setItem(STORAGE_DATE_KEY, new Date().toISOString());
+    return true;
+  }catch(err){
+    console.error("Could not save dashboard data:", err);
+    alert("The Excel data was loaded, but could not be saved in this browser. The file may be too large for localStorage.");
+    return false;
+  }
+}
+
+function loadSavedDashboardData(){
+  try{
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if(!saved) return false;
+
+    const parsed = JSON.parse(saved);
+    if(!Array.isArray(parsed)) return false;
+
+    data = parsed;
+
+    const savedName = localStorage.getItem(STORAGE_NAME_KEY);
+    const savedDate = localStorage.getItem(STORAGE_DATE_KEY);
+
+    document.getElementById("sourceName").textContent =
+      savedName ? savedName : "Saved Excel Data";
+
+    if(savedDate){
+      document.getElementById("lastUpdated").textContent =
+        `Saved: ${new Date(savedDate).toLocaleString()}`;
+    }
+
+    return true;
+  }catch(err){
+    console.error("Could not load saved dashboard data:", err);
+    return false;
+  }
+}
+
+function clearSavedDashboardData(){
+  const confirmed = confirm(
+    "Clear the saved Excel data from this browser and return to the default dashboard data?"
+  );
+
+  if(!confirmed) return;
+
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(STORAGE_NAME_KEY);
+  localStorage.removeItem(STORAGE_DATE_KEY);
+
+  location.reload();
+}
+
 document.getElementById("excelFile").addEventListener("change", async e=>{
-  const file=e.target.files[0]; if(!file) return;
+  const file=e.target.files[0];
+  if(!file) return;
+
   try{
     const buf=await file.arrayBuffer();
     const wb=XLSX.read(buf,{type:"array",cellDates:true});
     const ws=wb.Sheets[wb.SheetNames[0]];
+
     data=XLSX.utils.sheet_to_json(ws,{defval:""});
+
     document.getElementById("sourceName").textContent=file.name;
-    populateFilters(); render();
-  }catch(err){alert("Could not read the Excel file. Please select a valid .xlsx or .xls file.");}
+
+    saveDashboardData();
+
+    populateFilters();
+    render();
+  }catch(err){
+    console.error(err);
+    alert("Could not read the Excel file. Please select a valid .xlsx or .xls file.");
+  }
 });
-populateFilters(); render();
+
+const hasSavedData = loadSavedDashboardData();
+
+if(!hasSavedData){
+  document.getElementById("sourceName").textContent =
+    "CR DETAILS - HIRE PURCHASE(1).xlsx";
+}
+
+populateFilters();
+render();
 </script>
 </body>
 </html>
