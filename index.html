@@ -317,7 +317,7 @@ canvas {
     <div class="card kpi"><div class="label">Total CR</div><div class="value" id="totalCR">0</div><div class="desc">Count of chassis numbers on ACTIVE accounts</div></div>
     <div class="card kpi"><div class="label">Remarks Categories</div><div class="value" id="categoryCount">0</div><div class="desc">Unique DIHANK remarks</div></div>
     <div class="card kpi"><div class="label">Completed / Sent</div><div class="value" id="sentCR">0</div><div class="desc">CR SENT TO CCD + SENT TO SHOP + CR RECEIVED TO SLMO</div></div>
-    <div class="card kpi"><div class="label">Attention Required</div><div class="value" id="attentionCR">0</div><div class="desc">Pending / not received / corrections / sale return</div></div>
+    <div class="card kpi"><div class="label">Attention Required</div><div class="value" id="attentionCR">0</div><div class="desc">All CRs not yet completed or sent</div></div>
   </section>
 
   <section class="grid">
@@ -417,23 +417,40 @@ function render(){
   });
   const counts=countByRemark(filtered);
 
-  // TOTAL CR follows the selected Status filter.
-  // Default is ACTIVE, so the dashboard initially shows Active CRs.
-  // If CLOSED is selected, the card changes to the CLOSED CR count.
-  const selectedStatus = norm(document.getElementById("statusFilter").value).toUpperCase();
-  const statusRows = selectedStatus
-    ? crRows(data).filter(r => norm(r[st]).toUpperCase() === selectedStatus)
-    : crRows(data);
-
-  const statusTotal = statusRows.length;
-
-  const total=filtered.length;
-  document.getElementById("totalCR").textContent=statusTotal.toLocaleString();
+  // TOTAL CR follows the complete current filtered view.
+  // The dashboard defaults to ACTIVE, and selecting CLOSED counts closed CRs.
+  const total = filtered.length;
+  document.getElementById("totalCR").textContent = total.toLocaleString();
   document.getElementById("categoryCount").textContent=Object.keys(counts).length;
-  const completed=["CR SENT TO CCD","SENT TO SHOP","CR RECEIVED TO SLMO"];
-  const attention=["PENDING DOCUMENTS","CR NOT RECEIVED","RETURNED FOR CORRECTIONS","SALE RETURN"];
-  document.getElementById("sentCR").textContent=completed.reduce((a,k)=>a+(counts[k]||0),0).toLocaleString();
-  document.getElementById("attentionCR").textContent=attention.reduce((a,k)=>a+(counts[k]||0),0).toLocaleString();
+  // Count completed and attention CRs using normalized remark text.
+  // This handles extra spaces, different letter casing, and minor wording variations.
+  const normalizeRemark = value => norm(value)
+    .toUpperCase()
+    .replace(/\\s+/g, " ")
+    .trim();
+
+  const completed = [
+    "CR SENT TO CCD",
+    "SENT TO SHOP",
+    "CR RECEIVED TO SLMO"
+  ];
+
+  // Any CR that is not in a completed/sent category requires attention.
+  // This includes remarks such as:
+  // DOCUMENTS TO BE RECEIVE
+  // CR NOT RECEIVE FROM RMV
+  // CR RETURNED TO RMV FOR CORRECTIONS
+  // SALE RETURN and any other non-completed remark.
+  const remarkMatches = (remark, list) => {
+    const r = normalizeRemark(remark);
+    return list.some(item => r === item || r.includes(item));
+  };
+
+  const sentCount = filtered.filter(r => remarkMatches(r[rk], completed)).length;
+  const attentionCount = filtered.filter(r => !remarkMatches(r[rk], completed)).length;
+
+  document.getElementById("sentCR").textContent = sentCount.toLocaleString();
+  document.getElementById("attentionCR").textContent = attentionCount.toLocaleString();
   document.getElementById("rowCount").textContent=`${total.toLocaleString()} CR records`;
   document.getElementById("lastUpdated").textContent=`Loaded: ${new Date().toLocaleString()}`;
   drawCharts(counts);
@@ -463,7 +480,20 @@ function drawCharts(counts){
     options:{responsive:true,maintainAspectRatio:false,cutout:"62%",plugins:{legend:{position:"bottom",labels:{boxWidth:12,font:{size:10}}}}}
   });
 }
-function resetFilters(){document.getElementById("searchBox").value="";["remarkFilter","shopFilter","statusFilter"].forEach(id=>document.getElementById(id).value="");render();}
+function resetFilters(){
+  document.getElementById("searchBox").value="";
+  document.getElementById("remarkFilter").value="";
+  document.getElementById("shopFilter").value="";
+
+  // Reset to ACTIVE instead of ALL statuses.
+  const statusEl = document.getElementById("statusFilter");
+  const activeOption = [...statusEl.options].find(
+    o => o.value.trim().toUpperCase() === "ACTIVE"
+  );
+  statusEl.value = activeOption ? activeOption.value : "";
+
+  render();
+}
 function downloadCSV(){
   if(!filtered.length) return;
   const ws=XLSX.utils.json_to_sheet(filtered), wb=XLSX.utils.book_new();
