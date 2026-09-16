@@ -426,7 +426,7 @@ function render(){
   // This handles extra spaces, different letter casing, and minor wording variations.
   const normalizeRemark = value => norm(value)
     .toUpperCase()
-    .replace(/\\s+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
   const completed = [
@@ -446,8 +446,10 @@ function render(){
     return list.some(item => r === item || r.includes(item));
   };
 
+  // Completed CRs are only these three remark categories.
+  // Every other CR in the current filtered view is counted as Attention Required.
   const sentCount = filtered.filter(r => remarkMatches(r[rk], completed)).length;
-  const attentionCount = filtered.filter(r => !remarkMatches(r[rk], completed)).length;
+  const attentionCount = Math.max(0, filtered.length - sentCount);
 
   document.getElementById("sentCR").textContent = sentCount.toLocaleString();
   document.getElementById("attentionCR").textContent = attentionCount.toLocaleString();
