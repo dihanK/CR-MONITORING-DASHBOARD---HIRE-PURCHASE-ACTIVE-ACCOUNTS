@@ -314,7 +314,7 @@ canvas {
   </div>
 
   <section class="kpis">
-    <div class="card kpi"><div class="label">Total CR</div><div class="value" id="totalCR">0</div><div class="desc">Count of chassis numbers</div></div>
+    <div class="card kpi"><div class="label">Total CR</div><div class="value" id="totalCR">0</div><div class="desc">Count of chassis numbers on ACTIVE accounts</div></div>
     <div class="card kpi"><div class="label">Remarks Categories</div><div class="value" id="categoryCount">0</div><div class="desc">Unique DIHANK remarks</div></div>
     <div class="card kpi"><div class="label">Completed / Sent</div><div class="value" id="sentCR">0</div><div class="desc">CR SENT TO CCD + SENT TO SHOP + CR RECEIVED TO SLMO</div></div>
     <div class="card kpi"><div class="label">Attention Required</div><div class="value" id="attentionCR">0</div><div class="desc">Pending / not received / corrections / sale return</div></div>
@@ -392,6 +392,11 @@ function populateFilters(){
   fillSelect("remarkFilter",[...new Set(data.map(r=>norm(r[rk])||"NO REMARK"))].sort());
   fillSelect("shopFilter",[...new Set(data.map(r=>norm(r[sk])).filter(Boolean))].sort());
   fillSelect("statusFilter",[...new Set(data.map(r=>norm(r[st])).filter(Boolean))].sort());
+   // Default dashboard view = ACTIVE accounts.
+   const statusEl = document.getElementById("statusFilter");
+   if ([...statusEl.options].some(o => o.value.toUpperCase() === "ACTIVE")) {
+     statusEl.value = [...statusEl.options].find(o => o.value.toUpperCase() === "ACTIVE").value;
+   }
 }
 function fillSelect(id, vals){
   const el=document.getElementById(id), old=el.value;
@@ -411,8 +416,19 @@ function render(){
     return (!q||blob.includes(q)) && (!rf||(norm(r[rk])||"NO REMARK")===rf) && (!sf||norm(r[sk])===sf) && (!stf||norm(r[st])===stf);
   });
   const counts=countByRemark(filtered);
+
+  // TOTAL CR follows the selected Status filter.
+  // Default is ACTIVE, so the dashboard initially shows Active CRs.
+  // If CLOSED is selected, the card changes to the CLOSED CR count.
+  const selectedStatus = norm(document.getElementById("statusFilter").value).toUpperCase();
+  const statusRows = selectedStatus
+    ? crRows(data).filter(r => norm(r[st]).toUpperCase() === selectedStatus)
+    : crRows(data);
+
+  const statusTotal = statusRows.length;
+
   const total=filtered.length;
-  document.getElementById("totalCR").textContent=total.toLocaleString();
+  document.getElementById("totalCR").textContent=statusTotal.toLocaleString();
   document.getElementById("categoryCount").textContent=Object.keys(counts).length;
   const completed=["CR SENT TO CCD","SENT TO SHOP","CR RECEIVED TO SLMO"];
   const attention=["PENDING DOCUMENTS","CR NOT RECEIVED","RETURNED FOR CORRECTIONS","SALE RETURN"];
