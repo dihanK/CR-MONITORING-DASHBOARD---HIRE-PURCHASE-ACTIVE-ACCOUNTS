@@ -321,7 +321,7 @@ canvas {
     <div class="card kpi"><div class="label">Total CR</div><div class="value" id="totalCR">0</div><div class="desc">Count of chassis numbers on ACTIVE accounts</div></div>
     <div class="card kpi"><div class="label">Remarks Categories</div><div class="value" id="categoryCount">0</div><div class="desc">Unique DIHANK remarks</div></div>
     <div class="card kpi"><div class="label">Completed / Sent</div><div class="value" id="sentCR">0</div><div class="desc">CR SENT TO CCD + SENT TO SHOP + CR RECEIVED TO SLMO</div></div>
-    <div class="card kpi"><div class="label">Attention Required</div><div class="value" id="attentionCR">0</div><div class="desc">Document to be received + sent for correction + CR not receive from RMV</div></div>
+    <div class="card kpi"><div class="label">Attention Required</div><div class="value" id="attentionCR">0</div><div class="desc">Documents to be received + sent for correction + CR not receive from RMV</div></div>
   </section>
 
   <section class="grid">
@@ -451,12 +451,23 @@ function render(){
   // Matching is case-insensitive and ignores extra spaces so Excel values
   // such as "Document to be received" are counted correctly. SALE RETURN
   // is deliberately NOT included.
-  const attention=["DOCUMENT TO BE RECEIVED","SENT FOR CORRECTION","CR NOT RECEIVE FROM RMV"];
+  // ATTENTION REQUIRED = ONLY the three requested remark groups.
+  // The Excel file uses these exact values:
+  // 1) DOCUMENTS TO BE RECEIVE
+  // 2) CR RETURNED TO RMV FOR CORRECTIONS  (Sent for correction)
+  // 3) CR NOT RECEIVE FROM RMV
+  // SALE RETURN is intentionally excluded.
+  const attentionAliases = new Set([
+    "DOCUMENTS TO BE RECEIVE",
+    "DOCUMENT TO BE RECEIVED",
+    "SENT FOR CORRECTION",
+    "CR RETURNED TO RMV FOR CORRECTIONS",
+    "CR NOT RECEIVE FROM RMV"
+  ]);
   const normalizeRemark = v => norm(v).toUpperCase().replace(/\s+/g," ").trim();
-  const attentionSet = new Set(attention.map(normalizeRemark));
   const attentionCount = filtered.reduce((n,r) => {
     const remark = normalizeRemark(r[rk]);
-    return n + (attentionSet.has(remark) ? 1 : 0);
+    return n + (attentionAliases.has(remark) ? 1 : 0);
   }, 0);
 
   document.getElementById("sentCR").textContent=completed.reduce((a,k)=>a+(counts[k]||0),0).toLocaleString();
