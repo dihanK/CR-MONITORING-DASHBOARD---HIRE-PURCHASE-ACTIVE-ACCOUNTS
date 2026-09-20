@@ -33,7 +33,11 @@ input[type=file]{display:none}
 .grid{display:grid;grid-template-columns:1.25fr .75fr;gap:18px;margin-bottom:18px}
 .panel{padding:18px}.panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px}
 .panel-title{font-size:15px;font-weight:800}.panel-sub{font-size:11px;color:var(--muted)}
-.chart-wrap{height:310px;position:relative}
+ .chart-wrap{height:310px;position:relative}
+ .history-panel{margin-bottom:18px}
+ .history-meta{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+ .history-note{font-size:11px;color:var(--muted)}
+ .change-positive{color:var(--green);font-weight:800}.change-negative{color:var(--red);font-weight:800}.change-neutral{color:var(--muted);font-weight:700}
 .filters{display:grid;grid-template-columns:1.2fr 1fr 1fr auto;gap:10px;margin-bottom:12px}
 select,input[type=text]{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 11px;background:#fff;color:var(--ink);font-size:13px;outline:none}
 select:focus,input[type=text]:focus{border-color:#8db0ff;box-shadow:0 0 0 3px #eaf0ff}
@@ -317,7 +321,7 @@ canvas {
     <div class="card kpi"><div class="label">Total CR</div><div class="value" id="totalCR">0</div><div class="desc">Count of chassis numbers on ACTIVE accounts</div></div>
     <div class="card kpi"><div class="label">Remarks Categories</div><div class="value" id="categoryCount">0</div><div class="desc">Unique DIHANK remarks</div></div>
     <div class="card kpi"><div class="label">Completed / Sent</div><div class="value" id="sentCR">0</div><div class="desc">CR SENT TO CCD + SENT TO SHOP + CR RECEIVED TO SLMO</div></div>
-    <div class="card kpi"><div class="label">Attention Required</div><div class="value" id="attentionCR">0</div><div class="desc">All CRs not yet completed or sent</div></div>
+    <div class="card kpi"><div class="label">Attention Required</div><div class="value" id="attentionCR">0</div><div class="desc">Pending / not received / corrections / sale return</div></div>
   </section>
 
   <section class="grid">
@@ -329,6 +333,17 @@ canvas {
       <div class="panel-head"><div><div class="panel-title">Management Snapshot</div><div class="panel-sub">Current filtered dataset</div></div></div>
       <div class="chart-wrap"><canvas id="donutChart"></canvas></div>
     </div>
+  </section>
+
+  <section class="card panel history-panel">
+    <div class="panel-head">
+      <div><div class="panel-title">Daily CR Changes</div><div class="panel-sub">Compare the latest Excel update with the previous GitHub update</div></div>
+    </div>
+    <div class="history-meta">
+      <div class="history-note" id="historyStatus">Checking previous Excel version…</div>
+      <div class="history-note">Counts are based on non-blank chassis numbers and the dashboard's selected status logic.</div>
+    </div>
+    <div class="chart-wrap"><canvas id="historyChart"></canvas></div>
   </section>
 
   <section class="card panel">
@@ -357,7 +372,7 @@ canvas {
 const INITIAL_DATA = [];
 let data = INITIAL_DATA;
 let filtered = [];
-let remarkChart, donutChart;
+let remarkChart, donutChart, historyChart;
 
 // Use the GitHub RAW file directly so the dashboard works from both
 // GitHub Pages (https://...) and a local file opened with file://.
@@ -417,42 +432,23 @@ function render(){
   });
   const counts=countByRemark(filtered);
 
-  // TOTAL CR follows the complete current filtered view.
-  // The dashboard defaults to ACTIVE, and selecting CLOSED counts closed CRs.
-  const total = filtered.length;
-  document.getElementById("totalCR").textContent = total.toLocaleString();
+  // TOTAL CR follows the selected Status filter.
+  // Default is ACTIVE, so the dashboard initially shows Active CRs.
+  // If CLOSED is selected, the card changes to the CLOSED CR count.
+  const selectedStatus = norm(document.getElementById("statusFilter").value).toUpperCase();
+  const statusRows = selectedStatus
+    ? crRows(data).filter(r => norm(r[st]).toUpperCase() === selectedStatus)
+    : crRows(data);
+
+  const statusTotal = statusRows.length;
+
+  const total=filtered.length;
+  document.getElementById("totalCR").textContent=statusTotal.toLocaleString();
   document.getElementById("categoryCount").textContent=Object.keys(counts).length;
-  // Count completed and attention CRs using normalized remark text.
-  // This handles extra spaces, different letter casing, and minor wording variations.
-  const normalizeRemark = value => norm(value)
-    .toUpperCase()
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const completed = [
-    "CR SENT TO CCD",
-    "SENT TO SHOP",
-    "CR RECEIVED TO SLMO"
-  ];
-
-  // Any CR that is not in a completed/sent category requires attention.
-  // This includes remarks such as:
-  // DOCUMENTS TO BE RECEIVE
-  // CR NOT RECEIVE FROM RMV
-  // CR RETURNED TO RMV FOR CORRECTIONS
-  // SALE RETURN and any other non-completed remark.
-  const remarkMatches = (remark, list) => {
-    const r = normalizeRemark(remark);
-    return list.some(item => r === item || r.includes(item));
-  };
-
-  // Completed CRs are only these three remark categories.
-  // Every other CR in the current filtered view is counted as Attention Required.
-  const sentCount = filtered.filter(r => remarkMatches(r[rk], completed)).length;
-  const attentionCount = Math.max(0, filtered.length - sentCount);
-
-  document.getElementById("sentCR").textContent = sentCount.toLocaleString();
-  document.getElementById("attentionCR").textContent = attentionCount.toLocaleString();
+  const completed=["CR SENT TO CCD","SENT TO SHOP","CR RECEIVED TO SLMO"];
+  const attention=["PENDING DOCUMENTS","CR NOT RECEIVED","RETURNED FOR CORRECTIONS","SALE RETURN"];
+  document.getElementById("sentCR").textContent=completed.reduce((a,k)=>a+(counts[k]||0),0).toLocaleString();
+  document.getElementById("attentionCR").textContent=attention.reduce((a,k)=>a+(counts[k]||0),0).toLocaleString();
   document.getElementById("rowCount").textContent=`${total.toLocaleString()} CR records`;
   document.getElementById("lastUpdated").textContent=`Loaded: ${new Date().toLocaleString()}`;
   drawCharts(counts);
@@ -482,20 +478,75 @@ function drawCharts(counts){
     options:{responsive:true,maintainAspectRatio:false,cutout:"62%",plugins:{legend:{position:"bottom",labels:{boxWidth:12,font:{size:10}}}}}
   });
 }
-function resetFilters(){
-  document.getElementById("searchBox").value="";
-  document.getElementById("remarkFilter").value="";
-  document.getElementById("shopFilter").value="";
-
-  // Reset to ACTIVE instead of ALL statuses.
-  const statusEl = document.getElementById("statusFilter");
-  const activeOption = [...statusEl.options].find(
-    o => o.value.trim().toUpperCase() === "ACTIVE"
-  );
-  statusEl.value = activeOption ? activeOption.value : "";
-
-  render();
+function excelRowsFromBuffer(buf){
+  const wb=XLSX.read(buf,{type:"array",cellDates:true});
+  const ws=wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(ws,{defval:""});
 }
+
+function countRemarkForStatus(rows,statusValue){
+  if(!rows.length) return {};
+  const ck=key(rows[0],"Chassis number"), rk=key(rows[0],"REMARKS FROM DIHANK"), sk=key(rows[0],"STATUS");
+  const out={};
+  rows.forEach(r=>{
+    if(norm(r[ck])!=="" && (!statusValue || norm(r[sk]).toUpperCase()===statusValue.toUpperCase())){
+      const rem=norm(r[rk]) || "NO REMARK";
+      out[rem]=(out[rem]||0)+1;
+    }
+  });
+  return out;
+}
+
+async function loadHistory(){
+  const statusEl=document.getElementById("historyStatus");
+  try{
+    const repo="dihanK/CR-MONITORING-DASHBOARD---HIRE-PURCHASE-ACTIVE-ACCOUNTS";
+    const commitsUrl=`https://api.github.com/repos/${repo}/commits?path=data.xlsx&per_page=7`;
+    const cr=await fetch(commitsUrl,{cache:"no-store",headers:{"Accept":"application/vnd.github+json"}});
+    if(!cr.ok) throw new Error(`GitHub API HTTP ${cr.status}`);
+    const commits=await cr.json();
+    if(!Array.isArray(commits)||commits.length<2) throw new Error("At least two data.xlsx versions are required.");
+
+    const versions=commits.slice(0,7).reverse();
+    const snapshots=[];
+    for(const c of versions){
+      const rawUrl=`https://raw.githubusercontent.com/${repo}/${c.sha}/data.xlsx`;
+      const rr=await fetch(rawUrl,{cache:"no-store"});
+      if(!rr.ok) continue;
+      const rows=excelRowsFromBuffer(await rr.arrayBuffer());
+      const commitDate=new Date(c.commit?.author?.date || c.commit?.committer?.date || Date.now());
+      snapshots.push({date:commitDate,rows});
+    }
+    if(snapshots.length<2) throw new Error("Could not read two Excel versions.");
+
+    const selectedStatus=norm(document.getElementById("statusFilter").value).toUpperCase() || "ACTIVE";
+    const latest=snapshots[snapshots.length-1];
+    const previous=snapshots[snapshots.length-2];
+    const latestCounts=countRemarkForStatus(latest.rows,selectedStatus);
+    const previousCounts=countRemarkForStatus(previous.rows,selectedStatus);
+    const labels=[...new Set([...Object.keys(previousCounts),...Object.keys(latestCounts)])].sort((a,b)=>(latestCounts[b]||0)-(latestCounts[a]||0));
+
+    if(historyChart) historyChart.destroy();
+    historyChart=new Chart(document.getElementById("historyChart"),{
+      type:"bar",
+      data:{labels,datasets:[
+        {label:"Previous update",data:labels.map(x=>previousCounts[x]||0),borderRadius:5},
+        {label:"Latest update",data:labels.map(x=>latestCounts[x]||0),borderRadius:5}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,indexAxis:"y",plugins:{legend:{position:"top"},tooltip:{callbacks:{afterBody:(items)=>{
+        if(!items.length) return "";
+        const i=items[0].dataIndex, diff=(latestCounts[labels[i]]||0)-(previousCounts[labels[i]]||0);
+        return `Change: ${diff>0?"+":""}${diff}`;
+      }}}},scales:{x:{beginAtZero:true,ticks:{precision:0}},y:{grid:{display:false}}}}
+    });
+    statusEl.textContent=`${selectedStatus} CRs • Previous: ${previous.date.toLocaleDateString()} • Latest: ${latest.date.toLocaleDateString()} • ${snapshots.length} updates found`;
+  }catch(err){
+    console.error("Could not load historical Excel versions:",err);
+    statusEl.textContent="Daily change chart unavailable: GitHub history could not be read.";
+  }
+}
+
+function resetFilters(){document.getElementById("searchBox").value="";["remarkFilter","shopFilter","statusFilter"].forEach(id=>document.getElementById(id).value="");render();}
 function downloadCSV(){
   if(!filtered.length) return;
   const ws=XLSX.utils.json_to_sheet(filtered), wb=XLSX.utils.book_new();
@@ -532,6 +583,7 @@ async function loadGitHubExcel(){
 
     populateFilters();
     render();
+    loadHistory();
   }catch(err){
     console.error("Could not load data.xlsx:",err);
     sourceEl.textContent = "data.xlsx — Load failed";
