@@ -20,9 +20,7 @@ body{margin:0;background:var(--bg);font-family:Inter,Segoe UI,Arial,sans-serif;c
 h1{font-size:21px;margin:0 0 4px}.subtitle{font-size:12px;opacity:.75}
 .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 button,.file-label{border:0;border-radius:8px;padding:10px 14px;font-weight:650;cursor:pointer;font-size:13px}
-.file-label{background:#fff;color:var(--navy);display:inline-block}.file-label:hover{background:#eef4ff}
 button.secondary{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.2)}
-input[type=file]{display:none}
 .container{max-width:1500px;margin:24px auto;padding:0 24px}
 .notice{background:#edf5ff;border:1px solid #cfe0ff;color:#23456f;border-radius:10px;padding:12px 15px;margin-bottom:18px;font-size:13px}
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px}
@@ -303,14 +301,15 @@ canvas {
     <div><h1>CR Monitoring Dashboard</h1><div class="subtitle">Hire Purchase • Management Monitoring</div></div>
   </div>
   <div class="actions">
-    <label class="file-label" for="excelFile">↥ Upload Latest Excel</label>
-    <input id="excelFile" type="file" accept=".xlsx,.xls,.csv">
-    <button class="secondary" onclick="downloadCSV()">Export Current View</button>
+    <button class="secondary" id="crTab" onclick="switchView('cr')">Hire Purchase</button>
+    <button class="secondary" id="employeeTab" onclick="switchView('employee')">Employee Sale</button>
+    <button class="secondary" id="exportButton" onclick="downloadCSV()">Export Current View</button>
     
   </div>
 </header>
 
 <main class="container">
+  <div id="crView">
   <div class="notice">
     <b>Source:</b> <span id="sourceName">data.xlsx (GitHub)</span> &nbsp;•&nbsp;
     <b>CR definition:</b> 1 CR = 1 non-blank <b>Chassis number</b>. &nbsp;•&nbsp;
@@ -365,6 +364,30 @@ canvas {
       </table>
     </div>
   </section>
+  </div><!-- end crView -->
+  <section id="employeeView" class="card panel" style="display:none">
+    <div class="panel-head">
+      <div><div class="panel-title">Employee Sale Monitoring</div><div class="panel-sub">Separate view loaded from the “Emp Sales” worksheet in data.xlsx</div></div>
+    </div>
+    <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin:16px 0">
+      <div class="card kpi"><div class="label">Employee Records</div><div class="value" id="empRecordCount">0</div><div class="desc">Rows in Emp Sales sheet</div></div>
+      <div class="card kpi"><div class="label">Remarks Categories</div><div class="value" id="empPeopleCount">0</div><div class="desc">Unique CR status remarks</div></div>
+      <div class="card kpi"><div class="label">Active Sales</div><div class="value" id="empSalesTotal">0</div><div class="desc" id="empSalesDesc">Active employee sale records</div></div>
+    </div>
+    <div class="grid">
+      <div class="card panel">
+        <div class="panel-head"><div><div class="panel-title">Employee Sales by Shop</div><div class="panel-sub" id="empChartSub">Summary from Emp Sales worksheet</div></div></div>
+        <div class="chart-wrap"><canvas id="employeeChart"></canvas></div>
+      </div>
+      <div class="card panel">
+        <div class="panel-head"><div><div class="panel-title">Management Snapshot</div><div class="panel-sub">Employee sale records by CR status remark</div></div></div>
+        <div class="chart-wrap"><canvas id="employeeSnapshotChart"></canvas></div>
+      </div>
+    </div>
+    <div class="panel-head" style="margin-top:12px"><div><div class="panel-title">Employee Sale Details</div><div class="panel-sub">Records from the Emp Sales worksheet only</div></div></div>
+    <div class="statusbar"><span id="empRowCount">0 records</span><span id="empSheetStatus">Waiting for workbook…</span></div>
+    <div class="table-wrap"><table><thead><tr id="empHeadRow"></tr></thead><tbody id="empBodyRows"></tbody></table></div>
+  </section>
   <div class="footer">CR Monitoring Dashboard • Designed for daily management monitoring • Data is loaded from GitHub</div>
 </main>
 
@@ -372,7 +395,9 @@ canvas {
 const INITIAL_DATA = [];
 let data = INITIAL_DATA;
 let filtered = [];
-let remarkChart, donutChart, historyChart;
+let remarkChart, donutChart, historyChart, employeeChart, employeeSnapshotChart;
+let employeeData = [];
+let employeeHeaders = [];
 
 // Use the GitHub RAW file directly so the dashboard works from both
 // GitHub Pages (https://...) and a local file opened with file://.
@@ -576,6 +601,86 @@ function downloadCSV(){
   XLSX.utils.book_append_sheet(wb,ws,"CR Monitoring");
   XLSX.writeFile(wb,"CR_Monitoring_Current_View.xlsx");
 }
+function switchView(view){
+  const cr = view === "cr";
+  document.getElementById("crView").style.display = cr ? "" : "none";
+  document.getElementById("employeeView").style.display = cr ? "none" : "";
+  document.getElementById("crTab").style.background = cr ? "rgba(255,255,255,.24)" : "rgba(255,255,255,.12)";
+  document.getElementById("employeeTab").style.background = cr ? "rgba(255,255,255,.12)" : "rgba(255,255,255,.24)";
+  document.getElementById("exportButton").onclick = cr ? downloadCSV : downloadEmployeeCSV;
+  if(!cr) renderEmployeeSales();
+}
+function findColumn(headers, patterns){
+  return headers.find(h => patterns.some(p => p.test(String(h).trim())));
+}
+function renderEmployeeSales(){
+  const head=document.getElementById("empHeadRow"), body=document.getElementById("empBodyRows");
+  if(!employeeData.length){
+    head.innerHTML="";
+    body.innerHTML='<tr><td class="empty">The Emp Sales worksheet was not loaded. Please replace data.xlsx in the GitHub repository with the updated Excel file that contains the Emp Sales sheet, then refresh this website.</td></tr>';
+    document.getElementById("empRecordCount").textContent="0";
+    document.getElementById("empPeopleCount").textContent="0";
+    document.getElementById("empSalesTotal").textContent="0";
+    document.getElementById("empSalesDesc").textContent="Employee sale records loaded";
+    document.getElementById("empChartSub").textContent="No employee sales data loaded";
+    document.getElementById("empRowCount").textContent="0 records";
+    document.getElementById("empSheetStatus").textContent="Emp Sales sheet not loaded from GitHub data.xlsx";
+    if(employeeChart){employeeChart.destroy();employeeChart=null;}
+    if(employeeSnapshotChart){employeeSnapshotChart.destroy();employeeSnapshotChart=null;}
+    return;
+  }
+  const headers=employeeHeaders.length ? employeeHeaders.map(h=>String(h??"").trim()).filter(Boolean) : Object.keys(employeeData[0]);
+  const col=(patterns)=>findColumn(headers,patterns);
+  const shopCol=col([/^shop$/i,/^site(?: description|_des)?$/i,/shop\s*name/i]) || col([/shop\s*code/i]) || headers[0];
+  const statusCol=col([/^status$/i]);
+  const crStatusCol=col([/cr\s*status/i,/remark/i]);
+  const shopKey=key(employeeData[0],shopCol);
+  const statusKey=statusCol ? key(employeeData[0],statusCol) : null;
+  const crStatusKey=crStatusCol ? key(employeeData[0],crStatusCol) : null;
+  const activeCount=statusKey ? employeeData.filter(r=>norm(r[statusKey]).toUpperCase()==="ACTIVE").length : 0;
+  const remarkCategories=crStatusKey ? new Set(employeeData.map(r=>norm(r[crStatusKey]) || "NO REMARK")).size : 0;
+  document.getElementById("empRecordCount").textContent=employeeData.length.toLocaleString();
+  document.getElementById("empPeopleCount").textContent=remarkCategories.toLocaleString();
+  document.getElementById("empSalesTotal").textContent=activeCount.toLocaleString();
+  document.getElementById("empSalesDesc").textContent=statusKey ? "Active employee sale records" : "Employee sale records";
+  document.getElementById("empChartSub").textContent=`Number of employee sale records by ${shopCol}`;
+  const grouped={};
+  employeeData.forEach(r=>{
+    const shop=norm(r[shopKey]) || "Not specified";
+    grouped[shop]=(grouped[shop]||0)+1;
+  });
+  const labels=Object.keys(grouped).sort((a,b)=>grouped[b]-grouped[a] || a.localeCompare(b));
+  if(employeeChart) employeeChart.destroy();
+  employeeChart=new Chart(document.getElementById("employeeChart"),{
+    type:"bar",
+    data:{labels,datasets:[{label:"Employee Sale Records",data:labels.map(x=>grouped[x]),borderRadius:5}]},
+    options:{responsive:true,maintainAspectRatio:false,indexAxis:"y",plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>`Records: ${ctx.raw}`}}},scales:{x:{beginAtZero:true,ticks:{precision:0}},y:{grid:{display:false}}}}
+  });
+  const remarkCounts={};
+  employeeData.forEach(r=>{
+    const remark=(crStatusKey ? norm(r[crStatusKey]) : "") || "NO REMARK";
+    remarkCounts[remark]=(remarkCounts[remark]||0)+1;
+  });
+  const remarkLabels=Object.keys(remarkCounts).sort((a,b)=>remarkCounts[b]-remarkCounts[a] || a.localeCompare(b));
+  if(employeeSnapshotChart) employeeSnapshotChart.destroy();
+  employeeSnapshotChart=new Chart(document.getElementById("employeeSnapshotChart"),{
+    type:"doughnut",
+    data:{labels:remarkLabels,datasets:[{label:"Employee Sale Records",data:remarkLabels.map(x=>remarkCounts[x]),borderWidth:2}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:"58%",plugins:{legend:{position:"bottom",labels:{boxWidth:12,font:{size:10}}},tooltip:{callbacks:{label:(ctx)=>`${ctx.label}: ${ctx.raw} records`}}}}
+  });
+  head.innerHTML=headers.map(h=>`<th>${escapeHtml(h)}</th>`).join("");
+  body.innerHTML=employeeData.slice(0,2000).map(r=>`<tr>${headers.map(h=>`<td>${escapeHtml(norm(r[key(r,h)]))}</td>`).join("")}</tr>`).join("");
+  document.getElementById("empRowCount").textContent=`${employeeData.length.toLocaleString()} employee sale records`;
+  const crReceived=crStatusKey ? employeeData.filter(r=>norm(r[crStatusKey]).toUpperCase()==="CR RECEIVED TO SLMO").length : null;
+  document.getElementById("empSheetStatus").textContent=`Loaded ${employeeData.length} records from “Emp Sales” • ${headers.length} columns${crReceived!==null ? ` • CR received to SLMO: ${crReceived}` : ""}`;
+}
+function downloadEmployeeCSV(){
+  if(!employeeData.length) return;
+  const ws=XLSX.utils.json_to_sheet(employeeData), wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Employee Sales");
+  XLSX.writeFile(wb,"Employee_Sales_Current_View.xlsx");
+}
+
 async function loadGitHubExcel(){
   const sourceEl = document.getElementById("sourceName");
   const updatedEl = document.getElementById("lastUpdated");
@@ -593,13 +698,14 @@ async function loadGitHubExcel(){
 
     const buf = await response.arrayBuffer();
     const wb = XLSX.read(buf,{type:"array",cellDates:true});
-    const ws = wb.Sheets[wb.SheetNames[0]];
-
+    const crSheetName = wb.SheetNames.find(n => !/emp\s*sales/i.test(n)) || wb.SheetNames[0];
+    const ws = wb.Sheets[crSheetName];
     const rows = XLSX.utils.sheet_to_json(ws,{defval:""});
-    if(!rows.length){
-      throw new Error("The first worksheet is empty.");
-    }
-
+    if(!rows.length) throw new Error("The CR worksheet is empty.");
+    const normalizeSheetName = n => String(n).trim().toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
+    const empSheetName = wb.SheetNames.find(n => normalizeSheetName(n) === "emp sales");
+    employeeData = empSheetName ? XLSX.utils.sheet_to_json(wb.Sheets[empSheetName],{defval:""}) : [];
+    employeeHeaders = empSheetName ? (XLSX.utils.sheet_to_json(wb.Sheets[empSheetName],{header:1,defval:""})[0] || []) : [];
     data = rows;
     sourceEl.textContent = "data.xlsx (GitHub)";
     updatedEl.textContent = `Loaded from GitHub: ${new Date().toLocaleString()}`;
@@ -616,32 +722,11 @@ async function loadGitHubExcel(){
     render();
     alert(
       "Could not load data.xlsx from GitHub.\n\n" +
-      "Please check that data.xlsx exists in the main branch of the repository, " +
-      "then refresh the page. You can also use \"Upload Latest Excel\" to load a file manually."
+      "Please check that the updated data.xlsx exists in the main branch of the repository, " +
+      "then refresh the page."
     );
   }
 }
-
-document.getElementById("excelFile").addEventListener("change", async e=>{
-  const file=e.target.files[0];
-  if(!file) return;
-
-  try{
-    const buf=await file.arrayBuffer();
-    const wb=XLSX.read(buf,{type:"array",cellDates:true});
-    const ws=wb.Sheets[wb.SheetNames[0]];
-
-    data=XLSX.utils.sheet_to_json(ws,{defval:""});
-
-    document.getElementById("sourceName").textContent=file.name;
-
-    populateFilters();
-    render();
-  }catch(err){
-    console.error(err);
-    alert("Could not read the Excel file. Please select a valid .xlsx or .xls file.");
-  }
-});
 
 loadGitHubExcel();
 </script>
